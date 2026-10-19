@@ -83,3 +83,32 @@ test("config validation and environment overrides", () => {
   assert.equal(e.baseUrl, "http://h:1/v1");
   assert.equal(e.prefix, "system");
 });
+
+test("the endpoint URL: normalized, validated, and saved beside the other keys", async () => {
+  const { normalizeBaseUrl, saveBaseUrl, loadConfig } = await import("../src/config.ts");
+  const { mkdtemp, readFile, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  assert.equal(normalizeBaseUrl("http://192.168.0.66:9931"), "http://192.168.0.66:9931/v1");
+  assert.equal(normalizeBaseUrl(" http://h:1/v1/ "), "http://h:1/v1");
+  assert.equal(normalizeBaseUrl("https://llama.local.caohc.me/"), "https://llama.local.caohc.me/v1");
+  assert.equal(normalizeBaseUrl("http://h/proxy/strata"), "http://h/proxy/strata/v1", "a path prefix behind a proxy is kept");
+  assert.throws(() => normalizeBaseUrl("192.168.0.66:9931"), /http\(s\)|not a URL/);
+  assert.throws(() => normalizeBaseUrl("ftp://h/v1"), /http\(s\)/);
+  assert.throws(() => normalizeBaseUrl("http://h/v1?x=1"), /query/);
+  assert.throws(() => mergeConfig(DEFAULTS, { baseUrl: "nope" }), /baseUrl/);
+  assert.throws(() => applyEnv(DEFAULTS, { STRATA_BASE_URL: "nope" }), /STRATA_BASE_URL/);
+
+  const dir = await mkdtemp(join(tmpdir(), "pi-strata-"));
+  const path = join(dir, "strata.json");
+  assert.equal(await saveBaseUrl("http://a:1", path), "http://a:1/v1", "a new file");
+  await writeFile(path, JSON.stringify({ baseUrl: "http://a:1/v1", prefix: "system", maxTokens: 4096 }));
+  await saveBaseUrl("http://b:2/", path);
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { baseUrl: "http://b:2/v1", prefix: "system", maxTokens: 4096 });
+  const loaded = await loadConfig(path, {});
+  assert.equal(loaded.baseUrl, "http://b:2/v1");
+  assert.equal(loaded.prefix, "system");
+  assert.equal((await loadConfig(path, { STRATA_BASE_URL: "http://env:3" })).baseUrl, "http://env:3/v1", "the environment wins");
+  await writeFile(path, "[1]");
+  await assert.rejects(saveBaseUrl("http://c:3", path), /JSON object/, "a file that is not an object is not overwritten");
+});

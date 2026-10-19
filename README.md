@@ -9,7 +9,7 @@ levels, and two of Strata's request fields that a generic OpenAI-compatible prov
 | **Reasoning** | pi's thinking levels as Strata's `reasoning_effort` (`none`, `low`, `medium`, `high`; Strata's default is `high`): `off`→`none`, `minimal`→`low`, `low`→`low`, `medium`→`medium`, `high`/`xhigh`→`high`. `reasoning_budget_tokens` (Strata's hard thinking cap) per level: by default `minimal` thinks at `low` with at most 1024 tokens. |
 | **One-shot summaries** | pi's compaction, branch summaries and split-turn summaries are sent with `"strata_checkpoint": false`: no later request continues them, so Strata keeps no checkpoint for them and parks nothing (with `--conversation-cache-dir`, that is a file write of the whole summarization prompt saved). They also get `reasoning_effort: "low"`. |
 | **Shared prefix** (opt-in) | `"strata_prefix": {"messages": 1}` on agent requests: the system prompt and tool list are pinned in Strata's checkpoint cache, so new sessions on the same system prompt start from it. See the trade-off below. |
-| **`/strata`** | `status` (endpoint, models, mapping, what this session sent), `refresh`, `prefix on\|off` for the session. |
+| **`/strata`** | `status` (endpoint, models, mapping, what this session sent), `refresh`, `url [URL]` (show or set the server's endpoint), `prefix on\|off` for the session. |
 
 Only requests to this provider's models are changed. The fields are added in the provider's own stream functions,
 because pi's compaction calls do not pass through the `before_provider_request` extension event.
@@ -20,10 +20,17 @@ because pi's compaction calls do not pass through the `before_provider_request` 
 pi install ~/Projects/pi-strata          # or: pi -e ~/Projects/pi-strata for one run
 ```
 
-Point it at the server (`/v1` included) and give the API key if the server has one:
+Point it at the server, in pi:
+
+```
+/strata url http://192.168.0.66:9931
+```
+
+This saves `"baseUrl"` in `~/.pi/agent/strata.json` and lists the models there at once. Or set it in the file, or per
+shell with `export STRATA_BASE_URL=http://192.168.0.66:9931` (which wins over the file). `/v1` is added when the URL
+does not end with it; a path in front of it (a reverse proxy's prefix) is kept. Give the API key if the server has one:
 
 ```sh
-export STRATA_BASE_URL=http://192.168.0.66:9931/v1
 export STRATA_API_KEY=...                # or /login strata
 ```
 
@@ -45,6 +52,8 @@ Then `/model` → `strata/<model>`. A keyless server needs no key.
 }
 ```
 
+- `baseUrl`: the server's endpoint, default `http://127.0.0.1:8080/v1` (Strata's own default). Any http(s) URL;
+  `/v1` is added when missing. `/strata url` writes it, keeping the file's other keys.
 - `STRATA_BASE_URL` and `PI_STRATA_PREFIX` (`off`/`system`) override the file.
 - `reasoningBudgetTokens` replaces the default map (`{}`: no cap at any level).
 - `summaries.reasoning`: a Strata level, or `"inherit"` to keep the session's.

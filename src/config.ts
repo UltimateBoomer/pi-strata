@@ -1,7 +1,7 @@
 // Settings: built-in defaults, then ~/.pi/agent/strata.json (or $PI_STRATA_CONFIG), then environment variables.
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** pi's thinking levels. */
 export const PI_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -14,7 +14,7 @@ export type StrataEffort = typeof STRATA_EFFORTS[number];
 export interface StrataConfig {
   /** pi provider id the models are listed under. */
   provider: string;
-  /** Strata's OpenAI-compatible endpoint, ending in /v1. */
+  /** Strata's OpenAI-compatible endpoint ("baseUrl" in strata.json, $STRATA_BASE_URL): kept ending in /v1. */
   baseUrl: string;
   /** Environment variable holding the API key (Strata's "api_key" / $STRATA_API_KEY on the server). */
   apiKeyEnv: string;
@@ -65,6 +65,23 @@ export function agentDir(): string {
 
 export function configPath(): string {
   return process.env.PI_STRATA_CONFIG || join(agentDir(), "strata.json");
+}
+
+/**
+ * An endpoint as given ("http://host:9931", "http://host:9931/v1/") -> Strata's API root ("http://host:9931/v1").
+ * Throws for anything that is not an http(s) URL.
+ */
+export function normalizeBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error(`not a URL: ${JSON.stringify(value)} (for example http://192.168.0.66:9931/v1)`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`the Strata endpoint must be http(s), not ${url.protocol}`);
+  if (url.search || url.hash) throw new Error("the Strata endpoint takes no query or fragment");
+  const path = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${path.endsWith("/v1") ? path : `${path}/v1`}`;
 }
 
 function object(v: unknown): v is Record<string, unknown> {
@@ -131,17 +148,45 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
     if (raw.prefix !== "off" && raw.prefix !== "system") throw new Error('strata.json: "prefix" must be "off" or "system"');
     out.prefix = raw.prefix;
   }
-  out.baseUrl = out.baseUrl.replace(/\/+$/, "");
+  try {
+    out.baseUrl = normalizeBaseUrl(out.baseUrl);
+  } catch (error) {
+    throw new Error(`strata.json: "baseUrl": ${(error as Error).message}`);
+  }
   return out;
 }
 
 /** Environment overrides: STRATA_BASE_URL, PI_STRATA_PREFIX (off|system). */
 export function applyEnv(config: StrataConfig, env: NodeJS.ProcessEnv = process.env): StrataConfig {
   const out = { ...config };
-  if (env.STRATA_BASE_URL?.trim()) out.baseUrl = env.STRATA_BASE_URL.trim().replace(/\/+$/, "");
+  if (env.STRATA_BASE_URL?.trim()) {
+    try {
+      out.baseUrl = normalizeBaseUrl(env.STRATA_BASE_URL);
+    } catch (error) {
+      throw new Error(`STRATA_BASE_URL: ${(error as Error).message}`);
+    }
+  }
   const prefix = env.PI_STRATA_PREFIX?.trim();
   if (prefix === "off" || prefix === "system") out.prefix = prefix;
   return out;
+}
+
+/** Writes `baseUrl` into the config file, keeping its other keys (an atomic replace). Returns the stored value. */
+export async function saveBaseUrl(url: string, path = configPath()): Promise<string> {
+  const baseUrl = normalizeBaseUrl(url);
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    if (!object(parsed)) throw new Error("it does not hold a JSON object");
+    raw = parsed;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`${path}: ${(error as Error).message}`);
+  }
+  await mkdir(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  await writeFile(tmp, `${JSON.stringify({ ...raw, baseUrl }, null, 2)}\n`, { mode: 0o600 });
+  await rename(tmp, path);
+  return baseUrl;
 }
 
 export async function loadConfig(path = configPath(), env: NodeJS.ProcessEnv = process.env): Promise<StrataConfig> {
