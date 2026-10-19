@@ -93,7 +93,7 @@ test("the endpoint URL: normalized, validated, and saved beside the other keys",
   assert.equal(normalizeBaseUrl(" http://h:1/v1/ "), "http://h:1/v1");
   assert.equal(normalizeBaseUrl("https://llama.local.caohc.me/"), "https://llama.local.caohc.me/v1");
   assert.equal(normalizeBaseUrl("http://h/proxy/strata"), "http://h/proxy/strata/v1", "a path prefix behind a proxy is kept");
-  assert.throws(() => normalizeBaseUrl("192.168.0.66:9931"), /http\(s\)|not a URL/);
+  assert.throws(() => normalizeBaseUrl("192.168.0.66:9931"), /http\(s\)/);
   assert.throws(() => normalizeBaseUrl("ftp://h/v1"), /http\(s\)/);
   assert.throws(() => normalizeBaseUrl("http://h/v1?x=1"), /query/);
   assert.throws(() => mergeConfig(DEFAULTS, { baseUrl: "nope" }), /baseUrl/);

@@ -1,7 +1,7 @@
 // The pi provider: Strata's models behind pi's own OpenAI Chat Completions implementation.
 import type { Api, Model, Provider, RefreshModelsContext } from "@earendil-works/pi-ai";
 import { stream, streamSimple } from "@earendil-works/pi-ai/api/openai-completions";
-import type { PiLevel, StrataConfig } from "./config.ts";
+import { normalizeBaseUrl, saveBaseUrl, type PiLevel, type StrataConfig } from "./config.ts";
 import { discover, type Discovery, type Fetcher, type StrataModel } from "./discovery.ts";
 import { applyStrataFields, type Applied } from "./payload.ts";
 
@@ -36,7 +36,14 @@ export function withStrataFields(config: StrataConfig, level: PiLevel | undefine
   };
 }
 
-export function createStrataProvider(config: StrataConfig, deps: { fetcher?: Fetcher; onApplied?: (applied: Applied) => void } = {}) {
+export interface ProviderDeps {
+  fetcher?: Fetcher;
+  onApplied?: (applied: Applied) => void;
+  /** Stores the endpoint /login chose (default: "baseUrl" in strata.json). Returns the stored value. */
+  saveBaseUrl?: (url: string) => Promise<string>;
+}
+
+export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = {}) {
   let models: readonly StrataModel[] = [];
   const status: ProviderStatus = { models: 0, source: "none", warnings: [] };
   const record = (result: Discovery, source: ProviderStatus["source"]) => {
@@ -50,14 +57,42 @@ export function createStrataProvider(config: StrataConfig, deps: { fetcher?: Fet
   const provider: Provider<"openai-completions"> = {
     id: config.provider,
     name: "Strata",
-    baseUrl: config.baseUrl,
+    get baseUrl() { return config.baseUrl; },    // follows /login and /strata url
     auth: {
       apiKey: {
-        name: "Strata API key (blank for a server without one)",
-        login: async interaction => ({
-          type: "api_key",
-          key: (await interaction.prompt({ type: "secret", message: "Strata API key (blank for a server without one)" })).trim() || undefined,
-        }),
+        name: "Strata endpoint and API key",
+        // /login strata: the server's endpoint (saved in strata.json), then its API key (stored by pi)
+        login: async interaction => {
+          let why = "";
+          for (;;) {
+            const answer = (await interaction.prompt({
+              type: "text",
+              message: `${why}Strata endpoint (blank keeps ${config.baseUrl})`,
+              placeholder: "http://192.168.0.66:9931",
+            })).trim();
+            if (!answer) break;
+            try {
+              config.baseUrl = await (deps.saveBaseUrl ?? saveBaseUrl)(normalizeBaseUrl(answer));
+              break;
+            } catch (error) {
+              why = `${(error as Error).message}. `;      // asked again with the reason
+            }
+          }
+          if (process.env.STRATA_BASE_URL?.trim()) {
+            interaction.notify({ type: "info", message: "$STRATA_BASE_URL is set: it replaces the saved endpoint at the next start." });
+          }
+          const key = (await interaction.prompt({ type: "secret", message: "Strata API key (blank for a server without one)" })).trim() || undefined;
+          interaction.notify({ type: "progress", message: `Looking for models at ${config.baseUrl} ...` });
+          try {
+            record(await discover(config, { apiKey: key ?? process.env[config.apiKeyEnv] ?? config.apiKey,
+                                            signal: interaction.signal, fetcher: deps.fetcher }), "live");
+            interaction.notify({ type: "info", message: `${status.models} model(s) at ${config.baseUrl}. Run /model to pick one.` });
+          } catch (error) {
+            status.lastError = error instanceof Error ? error.message : String(error);
+            interaction.notify({ type: "info", message: `Saved, but ${status.lastError}` });
+          }
+          return { type: "api_key", key };
+        },
         resolve: async ({ ctx, credential }) => {
           const key = credential?.key ?? await ctx.env(config.apiKeyEnv) ?? config.apiKey ?? KEYLESS;
           return {

@@ -76,7 +76,7 @@ export function normalizeBaseUrl(value: string): string {
   try {
     url = new URL(value.trim());
   } catch {
-    throw new Error(`not a URL: ${JSON.stringify(value)} (for example http://192.168.0.66:9931/v1)`);
+    throw new Error(`${JSON.stringify(value.trim())} is not an http(s) URL`);
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`the Strata endpoint must be http(s), not ${url.protocol}`);
   if (url.search || url.hash) throw new Error("the Strata endpoint takes no query or fragment");

@@ -110,3 +110,42 @@ test("withStrataFields: pi's own payload hook first, then Strata's fields", asyn
   assert.deepEqual(seen, ["turn"]);
   assert.equal(await withStrataFields(DEFAULTS, undefined, undefined)("text", {} as any), undefined, "a non-object payload is left alone");
 });
+
+test("/login strata: the endpoint, then the API key", async () => {
+  const cfg = { ...DEFAULTS, baseUrl: "http://old.test/v1" };
+  const f = fakeFetch({ "http://new.test:9931/v1/models": { body: MODELS }, "http://new.test:9931/v1/status": { body: STATUS } });
+  const saved: string[] = [];
+  const { provider, status } = createStrataProvider(cfg, { fetcher: f, saveBaseUrl: async u => { saved.push(u); return u; } });
+  const answers = ["not a url", "http://new.test:9931", "secret-key"];
+  const asked: { type: string; message: string; placeholder?: string }[] = [];
+  const told: string[] = [];
+  const interaction = {
+    signal: new AbortController().signal,
+    prompt: async (p: any) => { asked.push(p); return answers.shift()!; },
+    notify: (e: any) => told.push(e.message),
+  };
+  const credential = await provider.auth.apiKey!.login!(interaction as any);
+  assert.deepEqual(asked.map(a => a.type), ["text", "text", "secret"], "an invalid URL is asked again");
+  assert.equal(asked[0].message, "Strata endpoint (blank keeps http://old.test/v1)");
+  assert.equal(asked[0].placeholder, "http://192.168.0.66:9931");
+  assert.equal(asked[1].message, '"not a url" is not an http(s) URL. Strata endpoint (blank keeps http://old.test/v1)',
+    "asked again with the reason");
+  assert.deepEqual(saved, ["http://new.test:9931/v1"]);
+  assert.equal(cfg.baseUrl, "http://new.test:9931/v1");
+  assert.equal(provider.baseUrl, "http://new.test:9931/v1", "the provider follows the new endpoint");
+  assert.deepEqual(credential, { type: "api_key", key: "secret-key" });
+  assert.equal(status.models, 1);
+  assert.equal(provider.getModels()[0].baseUrl, "http://new.test:9931/v1");
+  assert.ok(told.some(m => /1 model\(s\) at http:\/\/new\.test:9931\/v1/.test(m)));
+
+  // blank keeps the endpoint; a server that does not answer is reported, the login still completes
+  const kept: string[] = [];
+  const two = createStrataProvider({ ...DEFAULTS, baseUrl: "http://gone.test/v1" },
+    { fetcher: fakeFetch({}), saveBaseUrl: async u => { kept.push(u); return u; } });
+  const msgs: string[] = [];
+  const c2 = await two.provider.auth.apiKey!.login!({ signal: new AbortController().signal,
+    prompt: async () => "", notify: (e: any) => msgs.push(e.message) } as any);
+  assert.deepEqual(kept, [], "nothing saved for a blank answer");
+  assert.deepEqual(c2, { type: "api_key", key: undefined }, "a blank key: a server without one");
+  assert.ok(msgs.some(m => m.startsWith("Saved, but")));
+});

@@ -20,21 +20,17 @@ because pi's compaction calls do not pass through the `before_provider_request` 
 pi install ~/Projects/pi-strata          # or: pi -e ~/Projects/pi-strata for one run
 ```
 
-Point it at the server, in pi:
+Point it at the server, in pi: `/login` → **Sign in with an API key** → **Strata** asks for the endpoint first
+(blank keeps the current one; an invalid URL is asked again), then the API key (blank for a server without one), and
+lists the models there. Then `/model` → `strata/<model>`. Or set only the endpoint:
 
 ```
 /strata url http://192.168.0.66:9931
 ```
 
-This saves `"baseUrl"` in `~/.pi/agent/strata.json` and lists the models there at once. Or set it in the file, or per
+Both save `"baseUrl"` in `~/.pi/agent/strata.json` (pi keeps the key in its own `auth.json`). Or set it in the file, or per
 shell with `export STRATA_BASE_URL=http://192.168.0.66:9931` (which wins over the file). `/v1` is added when the URL
-does not end with it; a path in front of it (a reverse proxy's prefix) is kept. Give the API key if the server has one:
-
-```sh
-export STRATA_API_KEY=...                # or /login strata
-```
-
-Then `/model` → `strata/<model>`. A keyless server needs no key.
+does not end with it; a path in front of it (a reverse proxy's prefix) is kept. The key can also come from the environment: `export STRATA_API_KEY=...`. A keyless server needs no key.
 
 ## Configuration
 
