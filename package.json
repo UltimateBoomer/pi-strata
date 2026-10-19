@@ -1,0 +1,26 @@
+{
+  "name": "pi-strata",
+  "version": "0.1.0",
+  "description": "Strata provider for pi: model discovery, Strata's reasoning levels, one-shot summaries (strata_checkpoint) and pinned shared prefixes (strata_prefix)",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "strata"],
+  "files": ["index.ts", "src", "README.md"],
+  "pi": { "extensions": ["./index.ts"] },
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=1.3.0",
+    "@earendil-works/pi-coding-agent": ">=1.3.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
