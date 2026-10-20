@@ -57,7 +57,7 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
   const provider: Provider<"openai-completions"> = {
     id: config.provider,
     name: "Strata",
-    get baseUrl() { return config.baseUrl; },    // follows /login and /strata url
+    get baseUrl() { return config.baseUrl; },    // follows /login
     auth: {
       apiKey: {
         name: "Strata endpoint and API key",
