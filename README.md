@@ -9,7 +9,8 @@ levels, and two of Strata's request fields that a generic OpenAI-compatible prov
 | **Reasoning** | pi's thinking levels as Strata's `reasoning_effort` (`none`, `low`, `medium`, `high`; Strata's default is `high`): `off`→`none`, `minimal`→`low`, `low`→`low`, `medium`→`medium`, `high`/`xhigh`→`high`. `reasoning_budget_tokens` (Strata's hard thinking cap) per level: by default `minimal` thinks at `low` with at most 1024 tokens. |
 | **One-shot summaries** | pi's compaction, branch summaries and split-turn summaries are sent with `"strata_checkpoint": false`: no later request continues them, so Strata keeps no checkpoint for them and parks nothing (with `--conversation-cache-dir`, that is a file write of the whole summarization prompt saved). They also get `reasoning_effort: "low"`. |
 | **Shared prefix** (opt-in) | `"strata_prefix": {"messages": 1}` on agent requests: the system prompt and tool list are pinned in Strata's checkpoint cache, so new sessions on the same system prompt start from it. See the trade-off below. |
-| **`/strata`** | `status` (endpoint, models, mapping, what this session sent), `refresh`, `prefix on\|off` for the session. The endpoint is set with `/login`. |
+| **Priority** (opt-in) | `"strata_priority"` on every request, for Strata's turn scheduler: -20 to 19 like Unix nice, lower first. A request a band better (the server's `priority_preempt_delta`, default 5) preempts a worse one; a session's tool calls keep worse bands waiting. Set `"priority"` in `strata.json`, `PI_STRATA_PRIORITY`, or `/strata priority` for the session. |
+| **`/strata`** | `status` (endpoint, models, mapping, what this session sent), `refresh`, `prefix on\|off`, `priority <-20..19\|off>` for the session. The endpoint is set with `/login`. |
 
 Only requests to this provider's models are changed. The fields are added in the provider's own stream functions,
 because pi's compaction calls do not pass through the `before_provider_request` extension event.

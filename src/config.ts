@@ -45,6 +45,24 @@ export interface StrataConfig {
    * Worth it for many short sessions on one system prompt; leave "off" for long sessions that take turns.
    */
   prefix: "off" | "system";
+  /**
+   * "strata_priority" on every request (absent: none sent, the server's priority_default): -20 to 19 like Unix nice,
+   * lower first. A request a band better (the server's priority_preempt_delta, default 5) can preempt a worse one.
+   */
+  priority?: number;
+}
+
+/** Strata's priority range (serve/turns.py: PRIORITY_MIN, PRIORITY_MAX). */
+export const PRIORITY_MIN = -20;
+export const PRIORITY_MAX = 19;
+
+/** A priority as given ("-3", 4) -> a whole number in Strata's range. Throws for anything else. */
+export function parsePriority(value: unknown): number {
+  const n = typeof value === "string" && value.trim() !== "" ? Number(value.trim()) : value;
+  if (typeof n !== "number" || !Number.isSafeInteger(n) || n < PRIORITY_MIN || n > PRIORITY_MAX) {
+    throw new Error(`a priority is a whole number from ${PRIORITY_MIN} to ${PRIORITY_MAX} (lower first), not ${JSON.stringify(value)}`);
+  }
+  return n;
 }
 
 export const DEFAULTS: StrataConfig = {
@@ -148,6 +166,13 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
     if (raw.prefix !== "off" && raw.prefix !== "system") throw new Error('strata.json: "prefix" must be "off" or "system"');
     out.prefix = raw.prefix;
   }
+  if (raw.priority !== undefined && raw.priority !== null) {
+    try {
+      out.priority = parsePriority(raw.priority);
+    } catch (error) {
+      throw new Error(`strata.json: "priority": ${(error as Error).message}`);
+    }
+  }
   try {
     out.baseUrl = normalizeBaseUrl(out.baseUrl);
   } catch (error) {
@@ -156,7 +181,7 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
   return out;
 }
 
-/** Environment overrides: STRATA_BASE_URL, PI_STRATA_PREFIX (off|system). */
+/** Environment overrides: STRATA_BASE_URL, PI_STRATA_PREFIX (off|system), PI_STRATA_PRIORITY (-20..19). */
 export function applyEnv(config: StrataConfig, env: NodeJS.ProcessEnv = process.env): StrataConfig {
   const out = { ...config };
   if (env.STRATA_BASE_URL?.trim()) {
@@ -168,6 +193,13 @@ export function applyEnv(config: StrataConfig, env: NodeJS.ProcessEnv = process.
   }
   const prefix = env.PI_STRATA_PREFIX?.trim();
   if (prefix === "off" || prefix === "system") out.prefix = prefix;
+  if (env.PI_STRATA_PRIORITY?.trim()) {
+    try {
+      out.priority = parsePriority(env.PI_STRATA_PRIORITY);
+    } catch (error) {
+      throw new Error(`PI_STRATA_PRIORITY: ${(error as Error).message}`);
+    }
+  }
   return out;
 }
 

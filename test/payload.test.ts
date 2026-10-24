@@ -112,3 +112,16 @@ test("the endpoint URL: normalized, validated, and saved beside the other keys",
   await writeFile(path, "[1]");
   await assert.rejects(saveBaseUrl("http://c:3", path), /JSON object/, "a file that is not an object is not overwritten");
 });
+
+test("priority: sent on turns and summaries when set, from strata.json or PI_STRATA_PRIORITY", () => {
+  assert.equal(applyStrataFields(turn(), DEFAULTS, "medium")!.payload.strata_priority, undefined, "none sent by default");
+  const set = mergeConfig(DEFAULTS, { priority: -3 });
+  assert.equal(applyStrataFields(turn(), set, "medium")!.payload.strata_priority, -3);
+  assert.equal(applyStrataFields(summary(), set, "high")!.payload.strata_priority, -3);
+  assert.equal(applyEnv(DEFAULTS, { PI_STRATA_PRIORITY: " 7 " }).priority, 7);
+  assert.equal(applyEnv(set, {}).priority, -3);
+  for (const bad of [2.5, 20, -21, "high", true]) {
+    assert.throws(() => mergeConfig(DEFAULTS, { priority: bad }), /priority/);
+  }
+  assert.throws(() => applyEnv(DEFAULTS, { PI_STRATA_PRIORITY: "x" }), /PI_STRATA_PRIORITY/);
+});

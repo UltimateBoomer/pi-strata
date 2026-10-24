@@ -47,6 +47,10 @@ export function applyStrataFields(payload: unknown, config: StrataConfig, level:
   if (!object(payload)) return undefined;
   const out: Json = { ...payload };
   const added: string[] = [];
+  if (config.priority !== undefined) {
+    out.strata_priority = config.priority;   // the turn scheduler's priority (summaries too: the session's work)
+    added.push("strata_priority");
+  }
   if (isPiSummary(payload)) {
     if (config.summaries.oneShot) {
       out.strata_checkpoint = false;     // no checkpoint kept or parked for it: nothing continues a summary

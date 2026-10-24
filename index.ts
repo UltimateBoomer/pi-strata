@@ -7,9 +7,11 @@
 //   them, so Strata keeps and parks nothing for them) and a low reasoning effort.
 // - Shared prefix (opt-in, "prefix": "system"): every agent request pins its system prompt and tool list with
 //   "strata_prefix": {"messages": 1}.
+// - Priority (opt-in, "priority" or $PI_STRATA_PRIORITY, or /strata priority): every request carries
+//   "strata_priority" (-20..19, lower first) for Strata's turn scheduler.
 // Only requests to this provider's models are changed: the fields are added in its own stream functions.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { configPath, loadConfig, type PiLevel } from "./src/config.ts";
+import { configPath, loadConfig, parsePriority, type PiLevel } from "./src/config.ts";
 import type { Applied } from "./src/payload.ts";
 import { createStrataProvider } from "./src/provider.ts";
 
@@ -30,7 +32,7 @@ export default async function (pi: ExtensionAPI) {
   pi.registerProvider(current.provider);
 
   pi.registerCommand("strata", {
-    description: "Strata: status, refresh, or prefix on|off (the endpoint is set with /login)",
+    description: "Strata: status, refresh, prefix on|off, or priority <-20..19|off> (the endpoint is set with /login)",
     handler: async (args, ctx) => {
       const { status } = current;
       const [action = "status", value] = args.trim().split(/\s+/).filter(Boolean);
@@ -45,6 +47,25 @@ export default async function (pi: ExtensionAPI) {
           : "Strata: no shared prefix pinned.", "info");
         return;
       }
+      if (action === "priority") {
+        if (value === undefined) {
+          ctx.ui.notify(`Strata priority: ${config.priority ?? "not sent (the server's default)"}. Usage: /strata priority <-20..19|off>`, "info");
+          return;
+        }
+        if (value === "off") {
+          delete config.priority;
+          ctx.ui.notify("Strata: no priority sent (the server's default).", "info");
+          return;
+        }
+        try {
+          config.priority = parsePriority(value);
+        } catch (error) {
+          ctx.ui.notify(`Strata: ${(error as Error).message}`, "warning");
+          return;
+        }
+        ctx.ui.notify(`Strata: this session's requests go with priority ${config.priority} (lower first).`, "info");
+        return;
+      }
       if (action === "refresh") {
         await current.prime(key());
         if (status.lastError) ctx.ui.notify(`Strata: ${status.lastError}`, "error");
@@ -52,7 +73,7 @@ export default async function (pi: ExtensionAPI) {
         return;
       }
       if (action !== "status") {
-        ctx.ui.notify("Usage: /strata [status|refresh|prefix on|off]", "warning");
+        ctx.ui.notify("Usage: /strata [status|refresh|prefix on|off|priority <-20..19|off>]", "warning");
         return;
       }
       const lines = [
@@ -61,6 +82,7 @@ export default async function (pi: ExtensionAPI) {
         `reasoning: ${Object.entries(config.reasoning).map(([l, e]) => `${l}=${e}${config.reasoningBudgetTokens[l as PiLevel] ? `/${config.reasoningBudgetTokens[l as PiLevel]}` : ""}`).join(" ")}`,
         `summaries: ${config.summaries.oneShot ? "one-shot (strata_checkpoint=false)" : "kept"}, reasoning ${config.summaries.reasoning}`,
         `shared prefix: ${config.prefix === "system" ? "system prompt + tools" : "off"}`,
+        `priority: ${config.priority ?? "not sent (the server's default)"}`,
         `this session: ${counts.turns} turn(s), ${counts.summaries} summar${counts.summaries === 1 ? "y" : "ies"}, ${counts.prefixed} with a pinned prefix, ${counts.budgeted} with a thinking cap`,
         `config: ${configPath()}`,
         ...status.warnings,
