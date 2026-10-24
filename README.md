@@ -1,7 +1,12 @@
 # pi-strata
 
 A [pi](https://pi.dev) extension for [Strata](https://github.com/Niko1221/Strata): Strata as a provider, Strata's reasoning
-levels, and two of Strata's request fields that a generic OpenAI-compatible provider cannot send.
+levels, and Strata's request fields that a generic OpenAI-compatible provider cannot send.
+
+Turn priority (`strata_priority`) needs [UltimateBoomer/Strata](https://github.com/UltimateBoomer/Strata), a fork of
+Strata whose turn scheduler adds priority bands, reservations, aging and preemption (see its
+[docs/BATCHING.md](https://github.com/UltimateBoomer/Strata/blob/main/docs/BATCHING.md), "Priorities"). Upstream
+Strata never reads the field, so a priority has no effect there. Everything else works with upstream Strata.
 
 | What | How |
 |---|---|
@@ -9,7 +14,7 @@ levels, and two of Strata's request fields that a generic OpenAI-compatible prov
 | **Reasoning** | pi's thinking levels as Strata's `reasoning_effort` (`none`, `low`, `medium`, `high`; Strata's default is `high`): `off`→`none`, `minimal`→`low`, `low`→`low`, `medium`→`medium`, `high`/`xhigh`→`high`. `reasoning_budget_tokens` (Strata's hard thinking cap) per level: by default `minimal` thinks at `low` with at most 1024 tokens. |
 | **One-shot summaries** | pi's compaction, branch summaries and split-turn summaries are sent with `"strata_checkpoint": false`: no later request continues them, so Strata keeps no checkpoint for them and parks nothing (with `--conversation-cache-dir`, that is a file write of the whole summarization prompt saved). They also get `reasoning_effort: "low"`. |
 | **Shared prefix** (opt-in) | `"strata_prefix": {"messages": 1}` on agent requests: the system prompt and tool list are pinned in Strata's checkpoint cache, so new sessions on the same system prompt start from it. See the trade-off below. |
-| **Priority** (opt-in) | `"strata_priority"` on every request, for Strata's turn scheduler: -20 to 19 like Unix nice, lower first. A request a band better (the server's `priority_preempt_delta`, default 5) preempts a worse one; a session's tool calls keep worse bands waiting. Set `"priority"` in `strata.json`, `--strata-priority` for one run, or `/strata priority` for the session. Subagents from pi-simple-subagents get the session's priority. |
+| **Priority** (opt-in, [fork](https://github.com/UltimateBoomer/Strata) only) | `"strata_priority"` on every request, for Strata's turn scheduler: -20 to 19 like Unix nice, lower first. A request a band better (the server's `priority_preempt_delta`, default 5) preempts a worse one; a session's tool calls keep worse bands waiting. Set `"priority"` in `strata.json`, `--strata-priority` for one run, or `/strata priority` for the session. Subagents from pi-simple-subagents get the session's priority. |
 | **`/strata`** | `status` (endpoint, models, mapping, what this session sent), `refresh`, `prefix on\|off`, `priority <-20..19\|off>` for the session. The endpoint is set with `/login`. |
 
 Only requests to this provider's models are changed. The fields are added in the provider's own stream functions,
@@ -18,7 +23,8 @@ because pi's compaction calls do not pass through the `before_provider_request` 
 ## Install
 
 ```sh
-pi install ~/Projects/pi-strata          # or: pi -e ~/Projects/pi-strata for one run
+pi install npm:pi-strata                          # or: pi -e npm:pi-strata for one run
+pi install git:github.com/UltimateBoomer/pi-strata   # from GitHub
 ```
 
 Point it at the server, in pi: `/login` → **Sign in with an API key** → **Strata** asks for the endpoint first
@@ -26,8 +32,8 @@ Point it at the server, in pi: `/login` → **Sign in with an API key** → **St
 lists the models there. Then `/model` → `strata/<model>`. Run `/login` again to change the endpoint.
 
 This saves `"baseUrl"` in `~/.pi/agent/strata.json` (pi keeps the key in its own `auth.json`), or set it in the file.
-`/v1` is added when the URL does not end with it; a path in front of it (a reverse proxy's prefix) is kept. The key can
-also come from the environment: `export STRATA_API_KEY=...`. A keyless server needs no key.
+`/v1` is added when the URL does not end with it; a path in front of it (a reverse proxy's prefix) is kept. A keyless
+server needs no key.
 
 ## Configuration
 
@@ -36,7 +42,6 @@ also come from the environment: `export STRATA_API_KEY=...`. A keyless server ne
 ```json
 {
   "baseUrl": "http://192.168.0.66:9931/v1",
-  "apiKeyEnv": "STRATA_API_KEY",
   "maxTokens": 32768,
   "reasoning": { "off": "none", "minimal": "low", "low": "low", "medium": "medium", "high": "high", "xhigh": "high" },
   "reasoningBudgetTokens": { "minimal": 1024 },
@@ -49,9 +54,10 @@ also come from the environment: `export STRATA_API_KEY=...`. A keyless server ne
   `/v1` is added when missing. `/login` writes it, keeping the file's other keys.
 - `--strata-priority <-20..19>` overrides `"priority"` for one run; `/strata priority` and `/strata prefix on|off`
   change the session.
-- `STRATA_API_KEY` (the variable `apiKeyEnv` names) is the only environment setting. Startup model discovery reads the
-  key from it or from `"apiKey"`, not from `/login`'s stored key, so set it for `pi -p` and subagents on a server that
-  needs a key and has no model list saved for its endpoint yet.
+- `apiKey`: a key for startup model discovery. pi does not hand `/login`'s stored key to an extension at startup, so
+  `pi -p`, json and rpc runs (and subagents) on a server that needs a key use the model list pi saved at the last
+  `/login` or interactive refresh. Set `apiKey` instead where no list is saved yet, such as CI. No setting is read from
+  the environment.
 - `reasoningBudgetTokens` replaces the default map (`{}`: no cap at any level).
 - `summaries.reasoning`: a Strata level, or `"inherit"` to keep the session's.
 

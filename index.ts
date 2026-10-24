@@ -27,7 +27,7 @@ export default async function (pi: ExtensionAPI) {
   };
   // the fields are added in the provider's stream functions (src/provider.ts), so they reach every request to a
   // Strata model: pi's compaction calls do not pass through the before_provider_request event
-  const key = () => process.env[config.apiKeyEnv] ?? config.apiKey;
+  const key = () => config.apiKey;
   const current = createStrataProvider(config, { onApplied });
   await current.prime(key());
   pi.registerProvider(current.provider);

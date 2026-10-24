@@ -4,8 +4,13 @@
   "description": "Strata provider for pi: model discovery, Strata's reasoning levels, one-shot summaries (strata_checkpoint) and pinned shared prefixes (strata_prefix)",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/UltimateBoomer/pi-strata.git"
+  },
+  "homepage": "https://github.com/UltimateBoomer/pi-strata",
   "keywords": ["pi-package", "strata"],
-  "files": ["index.ts", "src", "README.md"],
+  "files": ["index.ts", "src", "README.md", "LICENSE"],
   "pi": { "extensions": ["./index.ts"] },
   "engines": { "node": ">=22.18.0" },
   "scripts": {

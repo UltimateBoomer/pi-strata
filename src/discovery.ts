@@ -73,7 +73,7 @@ export async function discover(
     if (!response.ok) {
       if (optional) return undefined;
       throw new Error(`Strata returned HTTP ${response.status} for ${url}` +
-        (response.status === 401 ? ` (set $${config.apiKeyEnv} or run /login strata)` : ""));
+        (response.status === 401 ? ' (run /login strata, or set "apiKey" in strata.json)' : ""));
     }
     const body: unknown = await response.json().catch(() => undefined);
     if (!object(body)) {

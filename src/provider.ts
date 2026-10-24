@@ -1,9 +1,20 @@
 // The pi provider: Strata's models behind pi's own OpenAI Chat Completions implementation.
 import type { Api, Model, Provider, RefreshModelsContext } from "@earendil-works/pi-ai";
-import { stream, streamSimple } from "@earendil-works/pi-ai/api/openai-completions";
+import { getApiProvider } from "@earendil-works/pi-ai/compat";
 import { normalizeBaseUrl, saveBaseUrl, type PiLevel, type StrataConfig } from "./config.ts";
 import { discover, type Discovery, type Fetcher, type StrataModel } from "./discovery.ts";
 import { applyStrataFields, type Applied } from "./payload.ts";
+
+/**
+ * pi's built-in OpenAI Chat Completions implementation, looked up per request. pi hands extensions its own
+ * @earendil-works/pi-ai entry points (the package, /compat, /oauth, /providers/all), not the api/ subpaths,
+ * so an installed package cannot import api/openai-completions.
+ */
+function completions() {
+  const api = getApiProvider("openai-completions");
+  if (!api) throw new Error("pi has no openai-completions implementation registered");
+  return api;
+}
 
 export interface ProviderStatus {
   models: number;
@@ -81,7 +92,7 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
           const key = (await interaction.prompt({ type: "secret", message: "Strata API key (blank for a server without one)" })).trim() || undefined;
           interaction.notify({ type: "progress", message: `Looking for models at ${config.baseUrl} ...` });
           try {
-            record(await discover(config, { apiKey: key ?? process.env[config.apiKeyEnv] ?? config.apiKey,
+            record(await discover(config, { apiKey: key ?? config.apiKey,
                                             signal: interaction.signal, fetcher: deps.fetcher }), "live");
             interaction.notify({ type: "info", message: `${status.models} model(s) at ${config.baseUrl}. Run /model to pick one.` });
           } catch (error) {
@@ -90,8 +101,8 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
           }
           return { type: "api_key", key };
         },
-        resolve: async ({ ctx, credential }) => {
-          const key = credential?.key ?? await ctx.env(config.apiKeyEnv) ?? config.apiKey ?? KEYLESS;
+        resolve: async ({ credential }) => {
+          const key = credential?.key ?? config.apiKey ?? KEYLESS;
           return {
             auth: { apiKey: key, baseUrl: config.baseUrl },
             source: credential?.key ? "stored API key" : key === KEYLESS ? "no API key" : "configured API key",
@@ -112,7 +123,7 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
       }
       if (!context.allowNetwork || context.signal.aborted) return;
       try {
-        const apiKey = context.credential?.type === "api_key" ? context.credential.key : process.env[config.apiKeyEnv] ?? config.apiKey;
+        const apiKey = context.credential?.type === "api_key" ? context.credential.key : config.apiKey;
         const result = await discover(config, { apiKey, signal: context.signal, fetcher: deps.fetcher });
         if (context.signal.aborted) return;
         const update = () => record(result, "live");
@@ -127,12 +138,12 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
         throw error;
       }
     },
-    stream: (model, context, options) => stream(model, context, {
+    stream: (model, context, options) => completions().stream(model, context, {
       ...options,
       onPayload: withStrataFields(config, (options as { reasoningEffort?: PiLevel } | undefined)?.reasoningEffort,
                                   options?.onPayload as PayloadHook | undefined, deps.onApplied),
     }),
-    streamSimple: (model, context, options) => streamSimple(model, context, {
+    streamSimple: (model, context, options) => completions().streamSimple(model, context, {
       ...options,
       onPayload: withStrataFields(config, options?.reasoning as PiLevel | undefined,
                                   options?.onPayload as PayloadHook | undefined, deps.onApplied),

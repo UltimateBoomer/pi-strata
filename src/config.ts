@@ -1,5 +1,5 @@
-// Settings: built-in defaults, then strata.json in pi's agent directory. The API key can come from $STRATA_API_KEY
-// ("apiKeyEnv"), and the priority from the --strata-priority flag.
+// Settings: built-in defaults, then strata.json in pi's agent directory. The priority can also come from the
+// --strata-priority flag. No setting is read from the environment.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,8 +17,10 @@ export interface StrataConfig {
   provider: string;
   /** Strata's OpenAI-compatible endpoint ("baseUrl" in strata.json, set by /login): kept ending in /v1. */
   baseUrl: string;
-  /** Environment variable holding the API key (Strata's "api_key" / $STRATA_API_KEY on the server). */
-  apiKeyEnv: string;
+  /**
+   * API key for startup model discovery ("apiKey" in strata.json). /login's stored key serves requests and refreshes,
+   * but pi does not hand it to an extension at startup.
+   */
   apiKey?: string;
   /** Discovery request timeout. */
   timeoutMs: number;
@@ -69,7 +71,6 @@ export function parsePriority(value: unknown): number {
 export const DEFAULTS: StrataConfig = {
   provider: "strata",
   baseUrl: "http://127.0.0.1:8080/v1",
-  apiKeyEnv: "STRATA_API_KEY",
   timeoutMs: 5000,
   maxTokens: 32768,
   reasoning: { off: "none", minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "high" },
@@ -119,7 +120,7 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
     ...base, reasoning: { ...base.reasoning }, reasoningBudgetTokens: { ...base.reasoningBudgetTokens },
     summaries: { ...base.summaries },
   };
-  for (const key of ["provider", "baseUrl", "apiKeyEnv", "apiKey"] as const) {
+  for (const key of ["provider", "baseUrl", "apiKey"] as const) {
     if (raw[key] === undefined) continue;
     if (typeof raw[key] !== "string" || !(raw[key] as string).trim()) throw new Error(`strata.json: "${key}" must be a non-empty string`);
     out[key] = (raw[key] as string).trim();

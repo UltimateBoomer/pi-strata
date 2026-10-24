@@ -60,7 +60,7 @@ test("discover: models, Strata identity and auth", async () => {
   const other = await discover(config, { fetcher: fakeFetch({ "http://strata.test/v1/models": { body: MODELS } }) });
   assert.equal(other.strata, false, "no /v1/status: not known to be Strata");
   await assert.rejects(discover(config, { fetcher: fakeFetch({ "http://strata.test/v1/models": { status: 401, body: {} } }) }),
-    /HTTP 401.*STRATA_API_KEY/);
+    /HTTP 401.*\/login strata/);
   await assert.rejects(discover(config, { fetcher: fakeFetch({ "http://strata.test/v1/models": { body: { data: "x" } } }) }), /data array/);
 });
 
@@ -89,12 +89,14 @@ test("provider: startup discovery, refresh, and the stored catalog offline", asy
   assert.equal((persisted as { models: unknown[] }).models.length, 1);
 });
 
-test("provider auth: a stored key, the environment, or none", async () => {
+test("provider auth: a stored key, strata.json's apiKey, or none", async () => {
   const { provider } = createStrataProvider(config);
   const resolve = provider.auth.apiKey!.resolve;
   const ctx = (env: Record<string, string>) => ({ env: async (k: string) => env[k] }) as any;
   assert.equal((await resolve({ ctx: ctx({}), credential: { type: "api_key", key: "stored" } } as any))?.auth.apiKey, "stored");
-  assert.equal((await resolve({ ctx: ctx({ STRATA_API_KEY: "envkey" }) } as any))?.auth.apiKey, "envkey");
+  assert.equal((await resolve({ ctx: ctx({ STRATA_API_KEY: "envkey" }) } as any))?.auth.apiKey, "strata-local", "the environment is not read");
+  const fromFile = createStrataProvider({ ...config, apiKey: "filekey" }).provider.auth.apiKey!.resolve;
+  assert.equal((await fromFile({ ctx: ctx({}) } as any))?.auth.apiKey, "filekey");
   assert.equal((await resolve({ ctx: ctx({}) } as any))?.auth.apiKey, "strata-local");
 });
 
