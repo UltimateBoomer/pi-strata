@@ -78,9 +78,6 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
               why = `${(error as Error).message}. `;      // asked again with the reason
             }
           }
-          if (process.env.STRATA_BASE_URL?.trim()) {
-            interaction.notify({ type: "info", message: "$STRATA_BASE_URL is set: it replaces the saved endpoint at the next start." });
-          }
           const key = (await interaction.prompt({ type: "secret", message: "Strata API key (blank for a server without one)" })).trim() || undefined;
           interaction.notify({ type: "progress", message: `Looking for models at ${config.baseUrl} ...` });
           try {

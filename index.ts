@@ -7,8 +7,9 @@
 //   them, so Strata keeps and parks nothing for them) and a low reasoning effort.
 // - Shared prefix (opt-in, "prefix": "system"): every agent request pins its system prompt and tool list with
 //   "strata_prefix": {"messages": 1}.
-// - Priority (opt-in, "priority" or $PI_STRATA_PRIORITY, or /strata priority): every request carries
-//   "strata_priority" (-20..19, lower first) for Strata's turn scheduler.
+// - Priority (opt-in, "priority", --strata-priority, or /strata priority): every request carries
+//   "strata_priority" (-20..19, lower first) for Strata's turn scheduler. Subagents started through the
+//   "subagent:spawn" event (pi-simple-subagents) get the session's priority as --strata-priority.
 // Only requests to this provider's models are changed: the fields are added in its own stream functions.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { configPath, loadConfig, parsePriority, type PiLevel } from "./src/config.ts";
@@ -30,6 +31,24 @@ export default async function (pi: ExtensionAPI) {
   const current = createStrataProvider(config, { onApplied });
   await current.prime(key());
   pi.registerProvider(current.provider);
+
+  // Flags are parsed after the extensions load, so the flag is read at session start. It wins over strata.json.
+  pi.registerFlag("strata-priority", { type: "string", description: "Strata turn priority for this run, -20..19 (lower first)" });
+  pi.on("session_start", (_event, ctx) => {
+    const flag = pi.getFlag("strata-priority");
+    if (typeof flag !== "string" || !flag.trim()) return;
+    try {
+      config.priority = parsePriority(flag);
+    } catch (error) {
+      ctx.ui.notify(`Strata: --strata-priority: ${(error as Error).message}`, "error");
+    }
+  });
+
+  // A child pi process loads this extension too (same settings, same -e sources), so it accepts the flag.
+  pi.events.on("subagent:spawn", (event) => {
+    const args = (event as { args?: unknown } | undefined)?.args;
+    if (config.priority !== undefined && Array.isArray(args)) args.push("--strata-priority", String(config.priority));
+  });
 
   pi.registerCommand("strata", {
     description: "Strata: status, refresh, prefix on|off, or priority <-20..19|off> (the endpoint is set with /login)",

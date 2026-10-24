@@ -1,4 +1,5 @@
-// Settings: built-in defaults, then ~/.pi/agent/strata.json (or $PI_STRATA_CONFIG), then environment variables.
+// Settings: built-in defaults, then strata.json in pi's agent directory. The API key can come from $STRATA_API_KEY
+// ("apiKeyEnv"), and the priority from the --strata-priority flag.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,7 +15,7 @@ export type StrataEffort = typeof STRATA_EFFORTS[number];
 export interface StrataConfig {
   /** pi provider id the models are listed under. */
   provider: string;
-  /** Strata's OpenAI-compatible endpoint ("baseUrl" in strata.json, $STRATA_BASE_URL): kept ending in /v1. */
+  /** Strata's OpenAI-compatible endpoint ("baseUrl" in strata.json, set by /login): kept ending in /v1. */
   baseUrl: string;
   /** Environment variable holding the API key (Strata's "api_key" / $STRATA_API_KEY on the server). */
   apiKeyEnv: string;
@@ -82,7 +83,7 @@ export function agentDir(): string {
 }
 
 export function configPath(): string {
-  return process.env.PI_STRATA_CONFIG || join(agentDir(), "strata.json");
+  return join(agentDir(), "strata.json");
 }
 
 /**
@@ -181,28 +182,6 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
   return out;
 }
 
-/** Environment overrides: STRATA_BASE_URL, PI_STRATA_PREFIX (off|system), PI_STRATA_PRIORITY (-20..19). */
-export function applyEnv(config: StrataConfig, env: NodeJS.ProcessEnv = process.env): StrataConfig {
-  const out = { ...config };
-  if (env.STRATA_BASE_URL?.trim()) {
-    try {
-      out.baseUrl = normalizeBaseUrl(env.STRATA_BASE_URL);
-    } catch (error) {
-      throw new Error(`STRATA_BASE_URL: ${(error as Error).message}`);
-    }
-  }
-  const prefix = env.PI_STRATA_PREFIX?.trim();
-  if (prefix === "off" || prefix === "system") out.prefix = prefix;
-  if (env.PI_STRATA_PRIORITY?.trim()) {
-    try {
-      out.priority = parsePriority(env.PI_STRATA_PRIORITY);
-    } catch (error) {
-      throw new Error(`PI_STRATA_PRIORITY: ${(error as Error).message}`);
-    }
-  }
-  return out;
-}
-
 /** Writes `baseUrl` into the config file, keeping its other keys (an atomic replace). Returns the stored value. */
 export async function saveBaseUrl(url: string, path = configPath()): Promise<string> {
   const baseUrl = normalizeBaseUrl(url);
@@ -221,12 +200,12 @@ export async function saveBaseUrl(url: string, path = configPath()): Promise<str
   return baseUrl;
 }
 
-export async function loadConfig(path = configPath(), env: NodeJS.ProcessEnv = process.env): Promise<StrataConfig> {
+export async function loadConfig(path = configPath()): Promise<StrataConfig> {
   let raw: unknown;
   try {
     raw = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`${path}: ${(error as Error).message}`);
   }
-  return applyEnv(mergeConfig(DEFAULTS, raw), env);
+  return mergeConfig(DEFAULTS, raw);
 }

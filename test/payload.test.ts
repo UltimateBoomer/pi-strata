@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULTS, mergeConfig, applyEnv } from "../src/config.ts";
+import { DEFAULTS, mergeConfig, parsePriority } from "../src/config.ts";
 import { applyStrataFields, isPiSummary, PI_SUMMARY_SYSTEM_PROMPT } from "../src/payload.ts";
 
 const SUMMARY_SYSTEM = `${PI_SUMMARY_SYSTEM_PROMPT} Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation.`;
@@ -68,7 +68,7 @@ test("the payload pi sent is not changed in place", () => {
   assert.equal(applyStrataFields("not an object", DEFAULTS, undefined), undefined);
 });
 
-test("config validation and environment overrides", () => {
+test("config validation", () => {
   assert.throws(() => mergeConfig(DEFAULTS, { reasoning: { high: "max" } }), /reasoning\.high/);
   assert.throws(() => mergeConfig(DEFAULTS, { reasoning: { ultra: "high" } }), /unknown pi level/);
   assert.throws(() => mergeConfig(DEFAULTS, { prefix: "all" }), /prefix/);
@@ -79,9 +79,6 @@ test("config validation and environment overrides", () => {
   assert.equal(c.reasoning.xhigh, "medium");
   assert.equal(c.reasoning.high, "high", "other levels keep their default");
   assert.equal(DEFAULTS.reasoning.xhigh, "high", "the defaults are not changed");
-  const e = applyEnv(c, { STRATA_BASE_URL: "http://h:1/v1/", PI_STRATA_PREFIX: "system" });
-  assert.equal(e.baseUrl, "http://h:1/v1");
-  assert.equal(e.prefix, "system");
 });
 
 test("the endpoint URL: normalized, validated, and saved beside the other keys", async () => {
@@ -97,7 +94,6 @@ test("the endpoint URL: normalized, validated, and saved beside the other keys",
   assert.throws(() => normalizeBaseUrl("ftp://h/v1"), /http\(s\)/);
   assert.throws(() => normalizeBaseUrl("http://h/v1?x=1"), /query/);
   assert.throws(() => mergeConfig(DEFAULTS, { baseUrl: "nope" }), /baseUrl/);
-  assert.throws(() => applyEnv(DEFAULTS, { STRATA_BASE_URL: "nope" }), /STRATA_BASE_URL/);
 
   const dir = await mkdtemp(join(tmpdir(), "pi-strata-"));
   const path = join(dir, "strata.json");
@@ -105,23 +101,21 @@ test("the endpoint URL: normalized, validated, and saved beside the other keys",
   await writeFile(path, JSON.stringify({ baseUrl: "http://a:1/v1", prefix: "system", maxTokens: 4096 }));
   await saveBaseUrl("http://b:2/", path);
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { baseUrl: "http://b:2/v1", prefix: "system", maxTokens: 4096 });
-  const loaded = await loadConfig(path, {});
+  const loaded = await loadConfig(path);
   assert.equal(loaded.baseUrl, "http://b:2/v1");
   assert.equal(loaded.prefix, "system");
-  assert.equal((await loadConfig(path, { STRATA_BASE_URL: "http://env:3" })).baseUrl, "http://env:3/v1", "the environment wins");
   await writeFile(path, "[1]");
   await assert.rejects(saveBaseUrl("http://c:3", path), /JSON object/, "a file that is not an object is not overwritten");
 });
 
-test("priority: sent on turns and summaries when set, from strata.json or PI_STRATA_PRIORITY", () => {
+test("priority: sent on turns and summaries when set, from strata.json or --strata-priority", () => {
   assert.equal(applyStrataFields(turn(), DEFAULTS, "medium")!.payload.strata_priority, undefined, "none sent by default");
   const set = mergeConfig(DEFAULTS, { priority: -3 });
   assert.equal(applyStrataFields(turn(), set, "medium")!.payload.strata_priority, -3);
   assert.equal(applyStrataFields(summary(), set, "high")!.payload.strata_priority, -3);
-  assert.equal(applyEnv(DEFAULTS, { PI_STRATA_PRIORITY: " 7 " }).priority, 7);
-  assert.equal(applyEnv(set, {}).priority, -3);
+  assert.equal(parsePriority(" 7 "), 7, "a flag value is a string");
   for (const bad of [2.5, 20, -21, "high", true]) {
     assert.throws(() => mergeConfig(DEFAULTS, { priority: bad }), /priority/);
   }
-  assert.throws(() => applyEnv(DEFAULTS, { PI_STRATA_PRIORITY: "x" }), /PI_STRATA_PRIORITY/);
+  for (const bad of ["x", "", "-21"]) assert.throws(() => parsePriority(bad), /priority/);
 });
