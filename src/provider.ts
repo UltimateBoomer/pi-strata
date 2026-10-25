@@ -4,6 +4,7 @@ import { getApiProvider } from "@earendil-works/pi-ai/compat";
 import { normalizeBaseUrl, saveBaseUrl, type PiLevel, type StrataConfig } from "./config.ts";
 import { discover, type Discovery, type Fetcher, type StrataModel } from "./discovery.ts";
 import { applyStrataFields, type Applied } from "./payload.ts";
+import type { Variants } from "./switching.ts";
 
 /**
  * pi's built-in OpenAI Chat Completions implementation, looked up per request. pi hands extensions its own
@@ -21,6 +22,7 @@ export interface ProviderStatus {
   source: "none" | "startup" | "cache" | "live";
   strata?: boolean;
   concurrency?: number;
+  variants?: Variants;
   checkedAt?: number;
   warnings: string[];
   lastError?: string;
@@ -60,7 +62,7 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
   const record = (result: Discovery, source: ProviderStatus["source"]) => {
     models = result.models;
     Object.assign(status, {
-      models: models.length, source, strata: result.strata, concurrency: result.concurrency,
+      models: models.length, source, strata: result.strata, concurrency: result.concurrency, variants: result.variants,
       checkedAt: Date.now(), warnings: result.warnings, lastError: undefined,
     });
   };

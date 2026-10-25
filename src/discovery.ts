@@ -1,7 +1,8 @@
-// The server's models, as Strata reports them: GET /v1/models (id, meta.n_ctx, input modalities, aliases) and
-// GET /v1/status (whether this is Strata at all).
+// The server's models, as Strata reports them: GET /v1/models (id, meta.n_ctx, input modalities, aliases, the model
+// variant) and GET /v1/status (whether this is Strata at all, and which variant is loaded).
 import type { Model } from "@earendil-works/pi-ai";
 import { PI_LEVELS, type StrataConfig } from "./config.ts";
+import { parseVariants, type Variants } from "./switching.ts";
 
 export type Fetcher = typeof fetch;
 export type StrataModel = Model<"openai-completions">;
@@ -12,6 +13,8 @@ export interface Discovery {
   strata: boolean;
   /** /v1/status: how many requests the server runs at once ("parallel"). */
   concurrency?: number;
+  /** /v1/status: the server's model variants (the fork's "models"), which one is loaded. */
+  variants?: Variants;
   warnings: string[];
 }
 
@@ -29,9 +32,11 @@ export function modelFromEntry(entry: unknown, config: StrataConfig): StrataMode
   if (typeof ctx !== "number" || !Number.isSafeInteger(ctx) || ctx <= 0) return undefined;   // not a chat model
   const modalities: unknown[] = Array.isArray(entry.architecture?.input_modalities) ? entry.architecture.input_modalities : ["text"];
   const input = (["text", "image"] as const).filter(m => modalities.includes(m));
+  // a model variant (the fork's "models"): every variant is listed, loaded or not; a request switches the server
+  const variant = typeof entry.meta?.variant === "string" ? entry.meta.variant : undefined;
   return {
     id: entry.id,
-    name: `${entry.id} (Strata)`,
+    name: `${entry.id} (Strata${variant ? `, ${variant}` : ""})`,
     api: "openai-completions",
     provider: config.provider,
     baseUrl: config.baseUrl,
@@ -91,5 +96,6 @@ export async function discover(
   const strata = status?.service === "strata";
   if (status && !strata) warnings.push(`${config.baseUrl} does not report itself as Strata; Strata's request fields may be ignored.`);
   const concurrency = typeof status?.concurrency?.serving === "number" ? status.concurrency.serving : undefined;
-  return { models, strata, concurrency, warnings };
+  const variants = parseVariants(status);
+  return { models, strata, concurrency, ...(variants ? { variants } : {}), warnings };
 }

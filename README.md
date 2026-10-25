@@ -3,10 +3,11 @@
 A [pi](https://pi.dev) extension for [Strata](https://github.com/Niko1221/Strata): Strata as a provider, Strata's reasoning
 levels, and Strata's request fields that a generic OpenAI-compatible provider cannot send.
 
-Turn priority (`strata_priority`) needs [UltimateBoomer/Strata](https://github.com/UltimateBoomer/Strata), a fork of
-Strata whose turn scheduler adds priority bands, reservations, aging and preemption (see its
-[docs/BATCHING.md](https://github.com/UltimateBoomer/Strata/blob/main/docs/BATCHING.md), "Priorities"). Upstream
-Strata never reads the field, so a priority has no effect there. Everything else works with upstream Strata.
+Turn priority (`strata_priority`) and model switching need [UltimateBoomer/Strata](https://github.com/UltimateBoomer/Strata),
+a fork of Strata whose turn scheduler adds priority bands, reservations, aging and preemption, and switches one server
+between variants of a model (see its [docs/BATCHING.md](https://github.com/UltimateBoomer/Strata/blob/main/docs/BATCHING.md),
+"Priorities" and "Model variants"). Upstream Strata never reads the priority field and serves one model, so neither
+has an effect there. Everything else works with upstream Strata.
 
 | What | How |
 |---|---|
@@ -15,7 +16,8 @@ Strata never reads the field, so a priority has no effect there. Everything else
 | **One-shot summaries** | pi's compaction, branch summaries and split-turn summaries are sent with `"strata_checkpoint": false`: no later request continues them, so Strata keeps no checkpoint for them and parks nothing (with `--conversation-cache-dir`, that is a file write of the whole summarization prompt saved). They also get `reasoning_effort: "low"`. |
 | **Shared prefix** (opt-in) | `"strata_prefix": {"messages": 1}` on agent requests: the system prompt and tool list are pinned in Strata's checkpoint cache, so new sessions on the same system prompt start from it. See the trade-off below. |
 | **Priority** (opt-in, [fork](https://github.com/UltimateBoomer/Strata) only) | `"strata_priority"` on every request, for Strata's turn scheduler: -20 to 19 like Unix nice, lower first. A request a band better (the server's `priority_preempt_delta`, default 5) preempts a worse one; a session's tool calls keep worse bands waiting. Set `"priority"` in `strata.json`, `--strata-priority` for one run, or `/strata priority` for the session. Subagents from pi-simple-subagents get the session's priority. |
-| **`/strata`** | `status` (endpoint, models, mapping, what this session sent), `refresh`, `prefix on\|off`, `priority <-20..19\|off>` for the session. The endpoint is set with `/login`. |
+| **Model variants** ([fork](https://github.com/UltimateBoomer/Strata) only) | A server with `"models"` (say Qwen3.8-Flash-Next Q2_0 and IQ3_XXS) runs one variant at a time. Every variant is listed, loaded or not, as `strata/<model id>` named with its variant (`qwen3.8-flash-next-iq3_xxs (Strata, q3)`); a request for one makes the server switch to it when the scheduler gives it the turn (about half a minute). Picking a variant in `/model` switches the server at once, so the switch runs while you type (`"switchOnSelect": false` leaves it to the first request; a busy server switches when a request for it gets the turn). While a turn waits for a switch, the status line says so. |
+| **`/strata`** | `status` (endpoint, models, the loaded variant, mapping, what this session sent), `refresh`, `models` (the variants, which is loaded, switch times), `load <variant or model id>` (switch now), `prefix on\|off`, `priority <-20..19\|off>` for the session. The endpoint is set with `/login`. |
 
 Only requests to this provider's models are changed. The fields are added in the provider's own stream functions,
 because pi's compaction calls do not pass through the `before_provider_request` extension event.
@@ -46,7 +48,8 @@ server needs no key.
   "reasoning": { "off": "none", "minimal": "low", "low": "low", "medium": "medium", "high": "high", "xhigh": "high" },
   "reasoningBudgetTokens": { "minimal": 1024 },
   "summaries": { "oneShot": true, "reasoning": "low" },
-  "prefix": "off"
+  "prefix": "off",
+  "switchOnSelect": true
 }
 ```
 
@@ -60,6 +63,8 @@ server needs no key.
   the environment.
 - `reasoningBudgetTokens` replaces the default map (`{}`: no cap at any level).
 - `summaries.reasoning`: a Strata level, or `"inherit"` to keep the session's.
+- `switchOnSelect`: with model variants, picking one in `/model` switches the server at once (`POST /v1/load`). Not
+  when a session is restored: a subagent restores its parent's model, and requests switch the server as needed.
 
 ## Matching the server
 

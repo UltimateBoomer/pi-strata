@@ -53,6 +53,12 @@ export interface StrataConfig {
    * lower first. A request a band better (the server's priority_preempt_delta, default 5) can preempt a worse one.
    */
   priority?: number;
+  /**
+   * With model variants on the server (the fork's "models"): picking one of them in /model asks the server to switch
+   * to it at once (POST /v1/load), so the switch runs while you type. A busy server switches when a request for the
+   * variant gets the turn instead. false: only requests switch it.
+   */
+  switchOnSelect: boolean;
 }
 
 /** Strata's priority range (serve/turns.py: PRIORITY_MIN, PRIORITY_MAX). */
@@ -77,6 +83,7 @@ export const DEFAULTS: StrataConfig = {
   reasoningBudgetTokens: { minimal: 1024 },
   summaries: { oneShot: true, reasoning: "low" },
   prefix: "off",
+  switchOnSelect: true,
 };
 
 export function agentDir(): string {
@@ -167,6 +174,10 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
   if (raw.prefix !== undefined) {
     if (raw.prefix !== "off" && raw.prefix !== "system") throw new Error('strata.json: "prefix" must be "off" or "system"');
     out.prefix = raw.prefix;
+  }
+  if (raw.switchOnSelect !== undefined) {
+    if (typeof raw.switchOnSelect !== "boolean") throw new Error('strata.json: "switchOnSelect" must be true or false');
+    out.switchOnSelect = raw.switchOnSelect;
   }
   if (raw.priority !== undefined && raw.priority !== null) {
     try {
