@@ -11,10 +11,12 @@
 //   "strata_priority" (-20..19, lower first) for Strata's turn scheduler. Subagents started through the
 //   "subagent:spawn" event (pi-simple-subagents) get the session's priority as --strata-priority.
 // - Model variants (UltimateBoomer/Strata's "models"): every variant is listed, loaded or not; a request for one
-//   switches the server. Picking one in /model switches it at once ("switchOnSelect"), the status line says while a
-//   turn waits for a switch, and /strata models | load <variant> show and switch them.
+//   switches the server. Picking one in /model switches it at once ("switchOnSelect"); a switch, and a turn that
+//   waits for one, are noted in the chat (a session entry, never sent to the model); /strata models | load <variant>
+//   show and switch them.
 // Only requests to this provider's models are changed: the fields are added in its own stream functions.
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { configPath, loadConfig, parsePriority, type PiLevel } from "./src/config.ts";
 import type { Applied } from "./src/payload.ts";
 import { createStrataProvider } from "./src/provider.ts";
@@ -58,8 +60,19 @@ export default async function (pi: ExtensionAPI) {
   type Ctx = Pick<ExtensionContext, "ui" | "modelRegistry">;
   const apiKeyOf = async (ctx: Ctx) =>
     (await ctx.modelRegistry.getApiKeyForProvider(config.provider).catch(() => undefined)) ?? config.apiKey;
-  const STATUS_KEY = "strata";
-  let waitingForSwitch = false;
+
+  // A switch shows in the chat as a session entry: drawn in the transcript (again when the session is resumed), never
+  // part of the model's context (a custom message would be sent as a user message)
+  const NOTE = "strata-switch";
+  type Note = { text: string; warning?: boolean };
+  pi.registerEntryRenderer<Note>(NOTE, (entry, _options, theme) => {
+    const note = entry.data;
+    if (!note?.text) return undefined;
+    return new Text(theme.fg(note.warning ? "warning" : "dim", `Strata: ${note.text}`), 1, 0);
+  });
+  const note = (text: string, warning = false) => pi.appendEntry<Note>(NOTE, { text, ...(warning ? { warning } : {}) });
+  /** A turn waits for the server to switch to this variant (since when), until its answer starts. */
+  let waiting: { variant: string; since: number } | undefined;
 
   /** Switch the server to the variant `model` names (POST /v1/load); `asked`: the user asked (/strata load). */
   const switchTo = async (model: string, ctx: Ctx, asked: boolean) => {
@@ -79,49 +92,47 @@ export default async function (pi: ExtensionAPI) {
       if (asked) ctx.ui.notify(`Strata: ${variant} is already loaded.`, "info");
       return;
     }
-    ctx.ui.setStatus(STATUS_KEY, `Strata: switching to ${variant} ...`);
+    note(`switching the server from ${now.active} to ${variant} ...`);
     const result = await loadVariant(config, now.models[variant], { apiKey });
-    ctx.ui.setStatus(STATUS_KEY, undefined);
     if (result.kind === "loaded") {
       if (result.variants) current.status.variants = result.variants;
-      ctx.ui.notify(`Strata: ${variant} is loaded (${result.seconds} s).`, "info");
+      note(`${variant} is loaded (${result.seconds} s).`);
     } else if (result.kind === "busy") {
-      ctx.ui.notify(`Strata: the server is busy; it switches to ${variant} when a request for it gets the turn.`, "info");
+      note(`the server is busy; it switches to ${variant} when a request for it gets the turn.`);
     } else {
-      ctx.ui.notify(`Strata: ${result.message}`, "warning");
+      note(result.message, true);
     }
   };
 
   // Picking a variant switches the server at once, so the switch runs while you type (not when a session is restored:
   // a subagent restores its parent's model, and the parent's requests switch the server as needed).
+  // The server is asked each time (GET /v1/status): startup discovery cannot use /login's key, so it may not know.
   pi.on("model_select", (event, ctx) => {
     if (event.model.provider !== config.provider || !config.switchOnSelect || event.source === "restore") return;
-    if (!current.status.variants) return;            // a server without variants (as last discovered)
     void switchTo(event.model.id, ctx, false);
   });
 
-  // A turn for a variant that is not loaded waits for the switch: say so until the answer starts.
+  // A turn for a variant that is not loaded waits for the switch: say so, and how long it waited once the answer starts.
   pi.on("agent_start", (_event, ctx) => {
     const model = ctx.model;
-    if (!model || model.provider !== config.provider || !current.status.variants) return;
+    if (!model || model.provider !== config.provider) return;
     void (async () => {
       const now = await fetchVariants(config, { apiKey: await apiKeyOf(ctx) });
       if (!now) return;
       current.status.variants = now;
       const variant = variantOf(now, model.id);
       if (variant && variant !== now.active) {
-        waitingForSwitch = true;
-        ctx.ui.setStatus(STATUS_KEY, `Strata: waiting for the server to switch to ${variant}`);
+        waiting = { variant, since: Date.now() };
+        note(`waiting for the server to switch from ${now.active} to ${variant}.`);
       }
     })();
   });
-  const switchDone = (ctx: Ctx) => {
-    if (!waitingForSwitch) return;
-    waitingForSwitch = false;
-    ctx.ui.setStatus(STATUS_KEY, undefined);
-  };
-  pi.on("message_update", (_event, ctx) => switchDone(ctx));
-  pi.on("agent_end", (_event, ctx) => switchDone(ctx));
+  pi.on("message_update", () => {
+    if (!waiting) return;
+    note(`the server switched to ${waiting.variant} (waited ${Math.round((Date.now() - waiting.since) / 1000)} s).`);
+    waiting = undefined;
+  });
+  pi.on("agent_end", () => { waiting = undefined; });
 
   pi.registerCommand("strata", {
     description: "Strata: status, refresh, models, load <variant>, prefix on|off, or priority <-20..19|off> (the endpoint is set with /login)",
