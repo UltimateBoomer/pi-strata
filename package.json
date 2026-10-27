@@ -1,7 +1,7 @@
 {
   "name": "pi-strata",
-  "version": "0.2.0",
-  "description": "Strata provider for pi: model discovery, Strata's reasoning levels, one-shot summaries (strata_checkpoint) and pinned shared prefixes (strata_prefix)",
+  "version": "0.3.0",
+  "description": "Strata provider for pi: model discovery, Strata's reasoning levels, sessions (strata_session, yield, drop), one-shot summaries and side calls (strata_checkpoint) and pinned shared prefixes (strata_prefix)",
   "type": "module",
   "license": "MIT",
   "repository": {
