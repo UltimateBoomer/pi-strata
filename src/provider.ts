@@ -3,7 +3,7 @@ import type { Api, Model, Provider, RefreshModelsContext } from "@earendil-works
 import { getApiProvider } from "@earendil-works/pi-ai/compat";
 import { normalizeBaseUrl, saveBaseUrl, type PiLevel, type StrataConfig } from "./config.ts";
 import { discover, type Discovery, type Fetcher, type StrataModel } from "./discovery.ts";
-import { applyStrataFields, type Applied } from "./payload.ts";
+import { applyStrataFields, type Applied, type Call } from "./payload.ts";
 import type { Variants } from "./switching.ts";
 
 /**
@@ -39,10 +39,10 @@ type PayloadHook = (payload: unknown, model: Model<Api>) => unknown | undefined 
  * before_provider_request does not see.
  */
 export function withStrataFields(config: StrataConfig, level: PiLevel | undefined, inner: PayloadHook | undefined,
-                                 onApplied?: (applied: Applied) => void): PayloadHook {
+                                 onApplied?: (applied: Applied) => void, call: () => Call = () => ({})): PayloadHook {
   return async (payload, model) => {
     const base = (inner ? await inner(payload, model) : undefined) ?? payload;
-    const applied = applyStrataFields(base, config, level);
+    const applied = applyStrataFields(base, config, level, call());
     if (!applied) return inner ? base : undefined;
     onApplied?.(applied);
     return applied.payload;
@@ -52,6 +52,8 @@ export function withStrataFields(config: StrataConfig, level: PiLevel | undefine
 export interface ProviderDeps {
   fetcher?: Fetcher;
   onApplied?: (applied: Applied) => void;
+  /** The session and what pi summarizes now, read as each request goes out (index.ts keeps them). */
+  call?: () => Call;
   /** Stores the endpoint /login chose (default: "baseUrl" in strata.json). Returns the stored value. */
   saveBaseUrl?: (url: string) => Promise<string>;
 }
@@ -143,12 +145,12 @@ export function createStrataProvider(config: StrataConfig, deps: ProviderDeps = 
     stream: (model, context, options) => completions().stream(model, context, {
       ...options,
       onPayload: withStrataFields(config, (options as { reasoningEffort?: PiLevel } | undefined)?.reasoningEffort,
-                                  options?.onPayload as PayloadHook | undefined, deps.onApplied),
+                                  options?.onPayload as PayloadHook | undefined, deps.onApplied, deps.call),
     }),
     streamSimple: (model, context, options) => completions().streamSimple(model, context, {
       ...options,
       onPayload: withStrataFields(config, options?.reasoning as PiLevel | undefined,
-                                  options?.onPayload as PayloadHook | undefined, deps.onApplied),
+                                  options?.onPayload as PayloadHook | undefined, deps.onApplied, deps.call),
     }),
   };
 

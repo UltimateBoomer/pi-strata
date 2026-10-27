@@ -103,7 +103,9 @@ test("provider auth: a stored key, strata.json's apiKey, or none", async () => {
 test("withStrataFields: pi's own payload hook first, then Strata's fields", async () => {
   const { withStrataFields } = await import("../src/provider.ts");
   const seen: string[] = [];
-  const inner = async (p: unknown) => ({ ...(p as object), temperature: 0 });
+  const { MAIN_TURN } = await import("../src/payload.ts");
+  // pi's agent hook: an extension's before_provider_request handler changed the payload, pi-strata's marked it
+  const inner = async (p: unknown) => ({ ...(p as object), temperature: 0, [MAIN_TURN]: true });
   const hook = withStrataFields(DEFAULTS, "minimal", inner, a => seen.push(a.kind));
   const out = await hook({ messages: [{ role: "system", content: "s" }, { role: "user", content: "u" }], reasoning_effort: "low" },
     {} as any) as Record<string, unknown>;

@@ -3,8 +3,15 @@
 // - Models: discovered from the server (GET /v1/models: id, context, image input), listed as strata/<id>.
 // - Reasoning: pi's levels are sent as Strata's reasoning_effort (none | low | medium | high), and per-level
 //   reasoning_budget_tokens caps the thinking where configured (default: minimal = low with 1024 tokens).
+// - Sessions: main turns carry "strata_session" (pi's session id), so Strata takes a new message or a retry for the
+//   same conversation, and "strata_yield_tools" ("yieldTools"): the tools whose calls it does not hold the turn for.
+//   Main turns are told apart by the before_provider_request event, which pi fires for the agent loop only.
 // - Summaries: pi's compaction and branch summaries are sent with "strata_checkpoint": false (nothing continues
-//   them, so Strata keeps and parks nothing for them) and a low reasoning effort.
+//   them, so Strata keeps and parks nothing for them), a low reasoning effort, the session and "strata_yield": true
+//   (the next prompt is read again anyway). Once a compaction succeeds, the next main turn sends "strata_drop": true
+//   (the session's cached conversation is obsolete).
+// - Side calls: any other request to a Strata model (an extension's own complete(), such as a memory review) goes as
+//   a one-shot of the session ("sideCalls").
 // - Shared prefix (opt-in, "prefix": "system"): every agent request pins its system prompt and tool list with
 //   "strata_prefix": {"messages": 1}.
 // - Priority (opt-in, "priority", --strata-priority, or /strata priority): every request carries
@@ -18,29 +25,35 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { configPath, loadConfig, parsePriority, type PiLevel } from "./src/config.ts";
-import type { Applied } from "./src/payload.ts";
+import { MAIN_TURN, type Applied, type Call } from "./src/payload.ts";
 import { createStrataProvider } from "./src/provider.ts";
 import { describeVariants, fetchVariants, loadVariant, variantOf } from "./src/switching.ts";
 
 export default async function (pi: ExtensionAPI) {
   const config = await loadConfig();
-  const counts = { summaries: 0, turns: 0, prefixed: 0, budgeted: 0 };
+  const counts = { summaries: 0, turns: 0, side: 0, prefixed: 0, budgeted: 0 };
   const onApplied = (applied: Applied) => {
     if (applied.kind === "summary") counts.summaries++;
+    else if (applied.kind === "side") counts.side++;
     else counts.turns++;
+    if (applied.added.includes("strata_drop")) call.compacted = undefined;   // sent once
     if (applied.added.includes("strata_prefix")) counts.prefixed++;
     if (applied.added.includes("reasoning_budget_tokens")) counts.budgeted++;
   };
   // the fields are added in the provider's stream functions (src/provider.ts), so they reach every request to a
   // Strata model: pi's compaction calls do not pass through the before_provider_request event
   const key = () => config.apiKey;
-  const current = createStrataProvider(config, { onApplied });
+  // the session (from session_start: one at a time per pi process) and what pi summarizes now
+  const call: Call = {};
+  const current = createStrataProvider(config, { onApplied, call: () => ({ ...call }) });
   await current.prime(key());
   pi.registerProvider(current.provider);
 
   // Flags are parsed after the extensions load, so the flag is read at session start. It wins over strata.json.
   pi.registerFlag("strata-priority", { type: "string", description: "Strata turn priority for this run, -20..19 (lower first)" });
   pi.on("session_start", (_event, ctx) => {
+    call.session = ctx.sessionManager.getSessionId() || undefined;
+    call.compacted = undefined;
     const flag = pi.getFlag("strata-priority");
     if (typeof flag !== "string" || !flag.trim()) return;
     try {
@@ -49,6 +62,19 @@ export default async function (pi: ExtensionAPI) {
       ctx.ui.notify(`Strata: --strata-priority: ${(error as Error).message}`, "error");
     }
   });
+
+  // Main turns: pi fires before_provider_request for the agent loop's requests only, and the provider's payload hook
+  // runs it before adding Strata's fields. The mark is a symbol: JSON leaves it out of any other provider's request.
+  pi.on("before_provider_request", (event, ctx) => {
+    const payload = event.payload;
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return undefined;
+    call.session = ctx.sessionManager.getSessionId() || call.session;
+    return { ...payload, [MAIN_TURN]: true };
+  });
+  // A compaction that succeeded makes the session's cached conversation obsolete: the next main turn says so
+  // (strata_drop). Not the summary request: the compaction may still fail or be cancelled, and a branch summary
+  // keeps the cache (the branch navigated to may share most of it).
+  pi.on("session_compact", () => { call.compacted = true; });
 
   // A child pi process loads this extension too (same settings, same -e sources), so it accepts the flag.
   pi.events.on("subagent:spawn", (event) => {
@@ -200,10 +226,12 @@ export default async function (pi: ExtensionAPI) {
         ...(status.variants ? [`variants: ${status.variants.active} loaded of ${Object.keys(status.variants.models).join(", ")}` +
                                ` (switch on /model: ${config.switchOnSelect ? "on" : "off"})`] : []),
         `reasoning: ${Object.entries(config.reasoning).map(([l, e]) => `${l}=${e}${config.reasoningBudgetTokens[l as PiLevel] ? `/${config.reasoningBudgetTokens[l as PiLevel]}` : ""}`).join(" ")}`,
-        `summaries: ${config.summaries.oneShot ? "one-shot (strata_checkpoint=false)" : "kept"}, reasoning ${config.summaries.reasoning}`,
+        `summaries: ${config.summaries.oneShot ? "one-shot (strata_checkpoint=false), yielding" : "kept"}, reasoning ${config.summaries.reasoning}`,
+        `session: ${config.session ? call.session ?? "none yet" : "not sent"}; side calls: ${config.sideCalls.oneShot ? "one-shot" : "as sent"}`,
+        `yield tools: ${config.yieldTools.length ? config.yieldTools.join(", ") : "none"}`,
         `shared prefix: ${config.prefix === "system" ? "system prompt + tools" : "off"}`,
         `priority: ${config.priority ?? "not sent (the server's default)"}`,
-        `this session: ${counts.turns} turn(s), ${counts.summaries} summar${counts.summaries === 1 ? "y" : "ies"}, ${counts.prefixed} with a pinned prefix, ${counts.budgeted} with a thinking cap`,
+        `this session: ${counts.turns} turn(s), ${counts.summaries} summar${counts.summaries === 1 ? "y" : "ies"}, ${counts.side} side call(s), ${counts.prefixed} with a pinned prefix, ${counts.budgeted} with a thinking cap`,
         `config: ${configPath()}`,
         ...status.warnings,
         ...(status.lastError ? [`last error: ${status.lastError}`] : []),

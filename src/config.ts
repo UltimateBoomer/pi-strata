@@ -59,6 +59,25 @@ export interface StrataConfig {
    * variant gets the turn instead. false: only requests switch it.
    */
   switchOnSelect: boolean;
+  /**
+   * "strata_session": pi's session id on its requests, so Strata knows them for one conversation: a new message or a
+   * retry continues it, its summaries and side calls are charged to it, and with the server's "park": "sessions" only
+   * its main turns are parked. false: none sent.
+   */
+  session: boolean;
+  /**
+   * "strata_yield_tools" on main turns: the tools whose calls take long (a subagent runs its own requests meanwhile),
+   * so Strata neither holds the turn for their results nor keeps other priority bands out while they run.
+   */
+  yieldTools: string[];
+  /** Requests to a Strata model that are neither main turns nor pi's summaries (an extension's own calls). */
+  sideCalls: {
+    /**
+     * Send "strata_checkpoint": false (and the session): Strata keeps and parks nothing for them and charges them to
+     * the session (with the server's "turn_side_wait_s", they also wait for its tool loop). false: sent as they are.
+     */
+    oneShot: boolean;
+  };
 }
 
 /** Strata's priority range (serve/turns.py: PRIORITY_MIN, PRIORITY_MAX). */
@@ -84,6 +103,9 @@ export const DEFAULTS: StrataConfig = {
   summaries: { oneShot: true, reasoning: "low" },
   prefix: "off",
   switchOnSelect: true,
+  session: true,
+  yieldTools: ["subagent"],
+  sideCalls: { oneShot: true },
 };
 
 export function agentDir(): string {
@@ -125,7 +147,7 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
   if (!object(raw)) throw new Error("strata.json must hold a JSON object");
   const out: StrataConfig = {
     ...base, reasoning: { ...base.reasoning }, reasoningBudgetTokens: { ...base.reasoningBudgetTokens },
-    summaries: { ...base.summaries },
+    summaries: { ...base.summaries }, yieldTools: [...base.yieldTools], sideCalls: { ...base.sideCalls },
   };
   for (const key of ["provider", "baseUrl", "apiKey"] as const) {
     if (raw[key] === undefined) continue;
@@ -175,9 +197,23 @@ export function mergeConfig(base: StrataConfig, raw: unknown): StrataConfig {
     if (raw.prefix !== "off" && raw.prefix !== "system") throw new Error('strata.json: "prefix" must be "off" or "system"');
     out.prefix = raw.prefix;
   }
-  if (raw.switchOnSelect !== undefined) {
-    if (typeof raw.switchOnSelect !== "boolean") throw new Error('strata.json: "switchOnSelect" must be true or false');
-    out.switchOnSelect = raw.switchOnSelect;
+  for (const key of ["switchOnSelect", "session"] as const) {
+    if (raw[key] === undefined) continue;
+    if (typeof raw[key] !== "boolean") throw new Error(`strata.json: "${key}" must be true or false`);
+    out[key] = raw[key] as boolean;
+  }
+  if (raw.yieldTools !== undefined) {
+    if (!Array.isArray(raw.yieldTools) || !raw.yieldTools.every(t => typeof t === "string" && t.trim())) {
+      throw new Error('strata.json: "yieldTools" must be a list of tool names');
+    }
+    out.yieldTools = raw.yieldTools.map(t => (t as string).trim());
+  }
+  if (raw.sideCalls !== undefined) {
+    if (!object(raw.sideCalls)) throw new Error('strata.json: "sideCalls" must be an object');
+    if (raw.sideCalls.oneShot !== undefined) {
+      if (typeof raw.sideCalls.oneShot !== "boolean") throw new Error('strata.json: "sideCalls.oneShot" must be true or false');
+      out.sideCalls.oneShot = raw.sideCalls.oneShot;
+    }
   }
   if (raw.priority !== undefined && raw.priority !== null) {
     try {

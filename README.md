@@ -13,7 +13,9 @@ has an effect there. Everything else works with upstream Strata.
 |---|---|
 | **Provider** | `strata/<model>`: the models the server reports (`GET /v1/models`: id, context, image input; aliases and the image model left out), streamed through pi's own OpenAI Chat Completions implementation. `GET /v1/status` confirms it is Strata. |
 | **Reasoning** | pi's thinking levels as Strata's `reasoning_effort` (`none`, `low`, `medium`, `high`; Strata's default is `high`): `off`→`none`, `minimal`→`low`, `low`→`low`, `medium`→`medium`, `high`/`xhigh`→`high`. `reasoning_budget_tokens` (Strata's hard thinking cap) per level: by default `minimal` thinks at `low` with at most 1024 tokens. |
-| **One-shot summaries** | pi's compaction, branch summaries and split-turn summaries are sent with `"strata_checkpoint": false`: no later request continues them, so Strata keeps no checkpoint for them and parks nothing (with `--conversation-cache-dir`, that is a file write of the whole summarization prompt saved). They also get `reasoning_effort: "low"`. |
+| **Sessions** ([fork](https://github.com/UltimateBoomer/Strata) only) | Main turns carry `"strata_session"` (pi's session id), so Strata takes a new message or a retry for the same conversation, and with the server's `"park": "sessions"` parks only main turns. They also carry `"strata_yield_tools"` (`yieldTools`, default `["subagent"]`): calls to these take long, so Strata neither holds the turn for their results nor keeps other priority bands out meanwhile. Main turns are the requests pi fires `before_provider_request` for: the agent loop's. |
+| **One-shot summaries** | pi's compaction, branch summaries and split-turn summaries are sent with `"strata_checkpoint": false`: no later request continues them, so Strata keeps no checkpoint for them and parks nothing (with `--conversation-cache-dir`, that is a file write of the whole summarization prompt saved). They also get `reasoning_effort: "low"`, the session, and `"strata_yield": true` (the session gives the turn up: its next prompt is read again after the summary anyway). Once a compaction succeeds, the session's next main turn sends `"strata_drop": true`: the conversation cached from before the compaction is never continued, so Strata does not write it out and evicts its parked copies first. The summary itself never drops it, since a compaction can still fail or be cancelled. |
+| **Side calls** | Any other request to a Strata model (an extension's own `complete()`, such as pi-hermes-memory's memory review) goes as a one-shot of the session: `"strata_checkpoint": false` and `"strata_session"`. `"sideCalls": {"oneShot": false}` sends them as they are. |
 | **Shared prefix** (opt-in) | `"strata_prefix": {"messages": 1}` on agent requests: the system prompt and tool list are pinned in Strata's checkpoint cache, so new sessions on the same system prompt start from it. See the trade-off below. |
 | **Priority** (opt-in, [fork](https://github.com/UltimateBoomer/Strata) only) | `"strata_priority"` on every request, for Strata's turn scheduler: -20 to 19 like Unix nice, lower first. A request a band better (the server's `priority_preempt_delta`, default 5) preempts a worse one; a session's tool calls keep worse bands waiting. Set `"priority"` in `strata.json`, `--strata-priority` for one run, or `/strata priority` for the session. Subagents from pi-simple-subagents get the session's priority. |
 | **Model variants** ([fork](https://github.com/UltimateBoomer/Strata) only) | A server with `"models"` (say Qwen3.8-Flash-Next Q2_0 and IQ3_XXS) runs one variant at a time. Every variant is listed, loaded or not, as `strata/<model id>` named with its variant (`qwen3.8-flash-next-iq3_xxs (Strata, q3)`); a request for one makes the server switch to it when the scheduler gives it the turn (about half a minute). Picking a variant in `/model` switches the server at once, so the switch runs while you type (`"switchOnSelect": false` leaves it to the first request; a busy server switches when a request for it gets the turn). A switch, and a turn that waits for one, are noted in the chat (`Strata: waiting for the server to switch from q2 to q3.`, then how long it waited): a session entry drawn in the transcript, never sent to the model. |
@@ -49,7 +51,10 @@ server needs no key.
   "reasoningBudgetTokens": { "minimal": 1024 },
   "summaries": { "oneShot": true, "reasoning": "low" },
   "prefix": "off",
-  "switchOnSelect": true
+  "switchOnSelect": true,
+  "session": true,
+  "yieldTools": ["subagent"],
+  "sideCalls": { "oneShot": true }
 }
 ```
 
@@ -63,6 +68,9 @@ server needs no key.
   the environment.
 - `reasoningBudgetTokens` replaces the default map (`{}`: no cap at any level).
 - `summaries.reasoning`: a Strata level, or `"inherit"` to keep the session's.
+- `session`: `false` sends no `strata_session` (and so no yield or drop with summaries).
+- `yieldTools`: the tool names sent as `strata_yield_tools`; `[]` sends none. pi's `web_search` and `fetch_content`
+  mostly return within Strata's 3 s hold, so they are not in the default.
 - `switchOnSelect`: with model variants, picking one in `/model` switches the server at once (`POST /v1/load`). Not
   when a session is restored: a subagent restores its parent's model, and requests switch the server as needed.
 
